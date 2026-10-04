@@ -1,16 +1,16 @@
 import { displayAuthor, ownerTypes, siteConfig, starColors, titleLines } from '../config.js';
+import { api } from '../lib/api.js';
 import {
-  buildShareUrl,
+  applyAuth,
   clearInviteFromUrl,
-  enterOwnSky,
-  enterSharedSky,
-  encodeSnapshot,
   getActiveSky,
   getSession,
+  getWechatOpenId,
   isHost,
-  login,
   logout,
   parseInvite,
+  resetWechatOpenId,
+  restoreSession,
 } from '../lib/session.js';
 import {
   canEditStar,
@@ -18,19 +18,18 @@ import {
   createStar,
   deleteStar,
   getRelations,
-  getShareableStars,
   getStarById,
   getState,
   getVisibleStars,
+  hydrateSky,
   isSkyQuiet,
   markDiscovered,
   markDiscoverySeen,
-  mergeSharedStars,
   releaseEasterEgg,
   updateStar,
 } from '../lib/stars.js';
 import { starVisuals, toPercent } from '../lib/position.js';
-import { cloudDoodle, moonSvg, scribbleSvg, starSvg, tinyMoon } from './icons.js';
+import { cloudDoodle, moonSvg, scribbleSvg, starSvg, tapSpark, tinyMoon, wechatSvg } from './icons.js';
 
 const OPENING_KEY = 'starry-together:opening-seen';
 
@@ -50,11 +49,17 @@ function setTitle() {
   document.title = siteConfig.siteTitle;
 }
 
-export function startApp() {
+export async function startApp() {
   setTitle();
   bindViewport();
-  if (getSession() && !getActiveSky()) enterOwnSky();
-  acceptInviteIfNeeded();
+  await restoreSession();
+  if (getSession()) {
+    try {
+      await hydrateSky();
+    } catch {
+      /* login screen if sky cannot load */
+    }
+  }
   window.addEventListener('hashchange', () => {
     route = location.hash === '#sky' ? 'sky' : 'home';
     closeOverlay();
@@ -62,15 +67,6 @@ export function startApp() {
   });
   document.addEventListener('keydown', onGlobalKey);
   render();
-}
-
-function acceptInviteIfNeeded() {
-  const invite = parseInvite();
-  const session = getSession();
-  if (!invite || !session) return;
-  enterSharedSky(invite.hostId, invite.hostName);
-  mergeSharedStars(invite.snapshot);
-  clearInviteFromUrl();
 }
 
 function bindViewport() {
@@ -88,6 +84,10 @@ function render() {
     renderLogin();
     return;
   }
+  if (parseInvite()) {
+    renderInvite();
+    return;
+  }
   if (route === 'home') {
     renderHome();
     return;
@@ -103,32 +103,113 @@ function renderLogin() {
       <div class="home-dust"></div>
       <div class="login-stage">
         ${moonSvg}
-        <form class="login-card" aria-labelledby="login-title">
-        <h1 id="login-title" class="login-title">先留下一个称呼</h1>
-        <p class="login-copy">${
-          invite
-            ? `有人把一片星空，分享给了你。<br>进来以后，主人就是${escapeHtml(invite.hostName)}。`
-            : '不需要手机号，也不需要真实姓名。<br>一个称呼，就够走进这片星空。'
-        }</p>
-        <label class="field">
-          <span>你想被怎么称呼？</span>
-          <input name="name" maxlength="16" required placeholder="比如：晚风" autocomplete="nickname" />
-        </label>
-        <button class="btn btn-solid" type="submit" aria-label="进入这片星空">进入这片星空</button>
-        </form>
+        <div class="login-card" aria-labelledby="login-title">
+          <h1 id="login-title" class="login-title">用微信走进这片星空</h1>
+          <p class="login-copy">${
+            invite
+              ? '有人把一片星空，邀请你一起写下。<br>先用微信登录，再决定要不要接受。'
+              : '用微信账号登录以后，星星会一直为你存着。<br>除非你让它休息，否则下次进来还在。'
+          }</p>
+          <button class="btn wechat-btn" type="button" data-wechat aria-label="微信登录">
+            ${wechatSvg}
+            <span>微信登录</span>
+          </button>
+          <button class="btn btn-ghost rest-action" type="button" data-switch-wx aria-label="换一个微信账号">
+            这不是你的微信？
+          </button>
+        </div>
       </div>
     </section>
   `;
-  const form = app.querySelector('form');
-  form.addEventListener('submit', (event) => {
-    event.preventDefault();
-    const name = String(new FormData(form).get('name') || '').trim();
-    if (!login(name)) return;
-    acceptInviteIfNeeded();
+  app.querySelector('[data-wechat]')?.addEventListener('click', startWechatLogin);
+  app.querySelector('[data-switch-wx]')?.addEventListener('click', () => {
+    resetWechatOpenId();
+    startWechatLogin();
+  });
+}
+
+async function startWechatLogin() {
+  const button = app.querySelector('[data-wechat]');
+  if (button) button.disabled = true;
+  try {
+    const start = await api.startWechat();
+    if (start.mode === 'oauth' && start.url) {
+      location.href = start.url;
+      return;
+    }
+    const data = await api.localWechat({
+      wechatOpenId: getWechatOpenId(),
+      name: '微信用户',
+    });
+    applyAuth(data);
+    await hydrateSky(data.sky);
     sessionStorage.removeItem(OPENING_KEY);
-    route = 'home';
-    location.hash = '';
     render();
+  } catch (error) {
+    console.error(error);
+    if (button) button.disabled = false;
+  }
+}
+
+async function renderInvite() {
+  const { token } = parseInvite();
+  let info = { hostName: '一位朋友', isMember: false };
+  try {
+    info = await api.readInvite(token);
+  } catch {
+    app.innerHTML = `
+      <section class="view home sky-wash login">
+        <div class="login-card">
+          <h1 class="login-title">这封邀请已经找不到了</h1>
+          <button class="btn btn-solid" type="button" data-home>回到自己的星空</button>
+        </div>
+      </section>
+    `;
+    app.querySelector('[data-home]')?.addEventListener('click', () => {
+      clearInviteFromUrl();
+      render();
+    });
+    return;
+  }
+
+  if (info.isMember) {
+    clearInviteFromUrl();
+    render();
+    return;
+  }
+
+  app.innerHTML = `
+    <section class="view home sky-wash login">
+      <div class="home-dust"></div>
+      <div class="login-stage">
+        ${moonSvg}
+        <div class="login-card" aria-labelledby="invite-title">
+          <h1 id="invite-title" class="login-title">接受这片星空的邀请</h1>
+          <p class="login-copy">
+            ${escapeHtml(info.hostName)} 把一片星空，递给了你。<br>
+            点下接受以后，你们会共享同一片星空。<br>
+            写下的星星会一直存着，除非有人让它休息。
+          </p>
+          <button class="btn btn-solid" type="button" data-accept aria-label="接受邀请">
+            接受邀请
+          </button>
+        </div>
+      </div>
+    </section>
+  `;
+  app.querySelector('[data-accept]')?.addEventListener('click', async (event) => {
+    event.currentTarget.disabled = true;
+    try {
+      const data = await api.acceptInvite(token);
+      applyAuth({ user: getSession(), sky: data.sky });
+      await hydrateSky(data.sky);
+      clearInviteFromUrl();
+      sessionStorage.removeItem(OPENING_KEY);
+      route = 'home';
+      render();
+    } catch {
+      event.currentTarget.disabled = false;
+    }
   });
 }
 
@@ -138,13 +219,20 @@ function renderHome() {
   app.innerHTML = `
     <section class="view home sky-wash">
       <div class="home-dust"></div>
-      <button class="opening${openingSeen ? ' is-gone' : ''}" type="button" data-opening aria-label="${escapeAttr(siteConfig.siteTitle)}，点一下进入">
+      <button class="opening${openingSeen ? ' is-gone' : ''}" type="button" data-opening aria-label="${escapeAttr(lines.first)} ${escapeAttr(lines.second)}，轻点进入">
         <span class="opening-moon" aria-hidden="true">${tinyMoon}</span>
         <span class="opening-title">
           <span class="opening-line">${escapeHtml(lines.first)}</span>
           ${lines.second ? `<span class="opening-rule" aria-hidden="true"></span><span class="opening-line">${escapeHtml(lines.second)}</span>` : ''}
         </span>
-        <span class="opening-hint">轻轻点一下</span>
+        <span class="opening-hint" aria-hidden="true">
+          <span class="tap-cue">
+            <span class="tap-ripple"></span>
+            <span class="tap-ripple tap-ripple-late"></span>
+            <span class="tap-glow"></span>
+            <span class="tap-spark">${tapSpark}</span>
+          </span>
+        </span>
       </button>
       <div class="home-content${openingSeen ? '' : ' is-waiting'}">
         <div class="home-stage">
@@ -293,36 +381,39 @@ function goSky() {
   location.hash = 'sky';
 }
 
-function openShareModal() {
+async function openShareModal() {
   const sky = getActiveSky();
   const host = isHost();
-  const shareUrl = new URL(buildShareUrl());
-  const packed = encodeSnapshot(getShareableStars());
-  if (packed) shareUrl.searchParams.set('d', packed);
-  const href = shareUrl.toString();
   const hostName = sky?.hostName || '一位朋友';
+  let href = location.origin + '/';
+  try {
+    const invite = await api.createInvite();
+    href = new URL(invite.path, location.origin).toString();
+  } catch {
+    /* keep fallback */
+  }
 
   showOverlay(`
     <div class="overlay" data-overlay>
       <div class="paper" role="dialog" aria-modal="true" aria-labelledby="share-title">
         <div class="paper-head">
-          <h2 id="share-title">把这片星空，送给朋友</h2>
+          <h2 id="share-title">邀请朋友来这片星空</h2>
           <button class="btn btn-ghost close-paper" type="button" data-close aria-label="先收起来">先收起来</button>
         </div>
         <p class="star-card-body">
           ${
             host
-              ? '发给微信里的一个人以后，你就是这片共享星空的主人。'
-              : `这片星空的主人是 ${escapeHtml(hostName)}。<br>再转发给别人，主人也还是这个人。`
+              ? '发给微信里的一个人。对方登录微信后，会看到「接受邀请」。接受以后，你们就共享这一片星空。'
+              : `这片星空的主人是 ${escapeHtml(hostName)}。再发给别人，主人也还是这个人。`
           }
         </p>
         <p class="share-link">${escapeHtml(href)}</p>
         <div class="form-actions">
-          <button class="btn btn-solid" type="button" data-copy aria-label="复制星空的路">复制这一小段路</button>
+          <button class="btn btn-solid" type="button" data-copy aria-label="复制邀请">复制邀请</button>
           <button class="btn btn-ghost" type="button" data-native-share aria-label="发给微信好友">发给微信好友</button>
         </div>
-        <button class="btn btn-ghost rest-action" type="button" data-switch aria-label="${host ? '换一个称呼' : '回到我的星空'}">
-          ${host ? '换一个称呼' : '回到我的星空'}
+        <button class="btn btn-ghost rest-action" type="button" data-logout aria-label="退出微信登录">
+          退出微信登录
         </button>
       </div>
     </div>
@@ -333,14 +424,12 @@ function openShareModal() {
       await navigator.clipboard.writeText(href);
       event.currentTarget.textContent = '已经抄下来了';
     } catch {
-      window.prompt('把这段复制给微信好友', href);
+      window.prompt('把这段发给微信好友', href);
     }
   });
 
   overlayRoot.querySelector('[data-native-share]')?.addEventListener('click', async () => {
-    const text = host
-      ? `我给你留了一片星空。\n${siteConfig.siteTitle}`
-      : `${hostName}把一片星空，留给了我们。\n${siteConfig.siteTitle}`;
+    const text = `${hostName}邀请你，一起来写一片星空。\n接受邀请后，星星会一直存着。`;
     if (navigator.share) {
       try {
         await navigator.share({ title: siteConfig.siteTitle, text, url: href });
@@ -356,16 +445,10 @@ function openShareModal() {
     }
   });
 
-  overlayRoot.querySelector('[data-switch]')?.addEventListener('click', () => {
-    if (host) {
-      logout();
-      closeOverlay();
-      render();
-      return;
-    }
-    enterOwnSky();
+  overlayRoot.querySelector('[data-logout]')?.addEventListener('click', async () => {
+    await logout();
     closeOverlay();
-    renderSky();
+    render();
   });
 }
 
@@ -379,8 +462,8 @@ function goHome() {
   render();
 }
 
-function openStarCard(id) {
-  const { star, justUnlocked } = markDiscovered(id);
+async function openStarCard(id) {
+  const { star, justUnlocked } = await markDiscovered(id);
   if (!star || star.resting) return;
   const date = formatDate(star.createdAt);
   const editable = canEditStar(star);
@@ -517,7 +600,7 @@ function openWriteModal(star = null) {
     });
   });
 
-  form.addEventListener('submit', (event) => {
+  form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const data = new FormData(form);
     const payload = {
@@ -530,7 +613,7 @@ function openWriteModal(star = null) {
     if (!payload.name || !payload.content) return;
 
     if (editing) {
-      updateStar(star.id, payload);
+      await updateStar(star.id, payload);
       sparkleStarId = star.id;
       closeOverlay();
       renderSky();
@@ -540,7 +623,7 @@ function openWriteModal(star = null) {
       return;
     }
 
-    const created = createStar(payload);
+    const created = await createStar(payload);
     enteringStarId = created.id;
     closeOverlay();
     renderSky();
@@ -572,11 +655,11 @@ function restStar(id) {
   renderSky();
   const node = app.querySelector(`[data-id="${CSS.escape(id)}"]`);
   let done = false;
-  const finish = () => {
+  const finish = async () => {
     if (done) return;
     done = true;
     window.clearTimeout(restTimer);
-    deleteStar(id);
+    await deleteStar(id);
     leavingStarId = null;
     render();
   };
@@ -613,13 +696,13 @@ function openDiscoveryNotes(step = 1) {
     </div>
   `);
 
-  overlayRoot.querySelector('[data-next]')?.addEventListener('click', () => {
+  overlayRoot.querySelector('[data-next]')?.addEventListener('click', async () => {
     if (step === 1) {
       openDiscoveryNotes(2);
       return;
     }
-    markDiscoverySeen();
-    releaseEasterEgg();
+    await markDiscoverySeen();
+    await releaseEasterEgg();
     flyInEaster = true;
     closeOverlay();
     renderSky();

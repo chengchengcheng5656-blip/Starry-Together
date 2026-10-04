@@ -1,6 +1,8 @@
 /** Site-wide copy and tokens. Change siteTitle here without rewriting the app. */
 export const siteConfig = {
   siteTitle: '我们的星星，慢慢亮起来了',
+  openingFirst: 'Our Stars',
+  openingSecond: 'Slowly Lighting Up',
   heroLine: '给你做了一片星空。',
   heroSub: '这里藏着一些我们的星星。',
   heroHint: '每个人都可以留下一颗。',
@@ -8,12 +10,11 @@ export const siteConfig = {
   whisperB: '有些话适合留在星星里。',
 };
 
-export function titleLines(title = siteConfig.siteTitle) {
-  if (title.includes('，')) {
-    const [first, ...rest] = title.split('，');
-    return { first, second: rest.join('，') };
-  }
-  return { first: title, second: '' };
+export function titleLines() {
+  return {
+    first: siteConfig.openingFirst,
+    second: siteConfig.openingSecond,
+  };
 }
 
 export const ownerTypes = [

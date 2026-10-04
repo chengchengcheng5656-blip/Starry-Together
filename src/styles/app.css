@@ -16,6 +16,7 @@
   --safe-top: env(safe-area-inset-top, 0px);
   --vvh: 100dvh;
   --font-title: 'Ma Shan Zheng', 'ZCOOL XiaoWei', serif;
+  --font-round: 'Fredoka', 'Comfortaa', sans-serif;
   --font-ui: 'ZCOOL XiaoWei', 'Noto Serif SC', serif;
   --font-body: 'Noto Serif SC', serif;
   --ocean: #6d8cb8;
@@ -135,12 +136,14 @@ button {
 }
 
 .opening-line {
-  font-family: var(--font-title);
-  font-size: clamp(2.05rem, 8.6vw, 3.35rem);
-  line-height: 1.45;
-  letter-spacing: 0.16em;
+  font-family: var(--font-round);
+  font-weight: 500;
+  font-synthesis: none;
+  font-size: clamp(2.1rem, 8vw, 3.1rem);
+  line-height: 1.2;
+  letter-spacing: 0.04em;
   color: #f8efe4;
-  text-shadow: 0 0 28px rgba(246, 228, 196, 0.28);
+  text-shadow: 0 0 22px rgba(246, 228, 196, 0.22);
 }
 
 .opening-rule {
@@ -150,10 +153,68 @@ button {
 }
 
 .opening-hint {
-  font-family: var(--font-ui);
-  font-size: 0.88rem;
-  letter-spacing: 0.22em;
-  color: rgba(247, 236, 220, 0.52);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 110px;
+  pointer-events: none;
+}
+
+.tap-cue {
+  position: relative;
+  width: 108px;
+  height: 110px;
+  color: #f6ead2;
+}
+
+.tap-ripple,
+.tap-glow,
+.tap-spark {
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+}
+
+.tap-ripple,
+.tap-glow {
+  border-radius: 50%;
+  translate: -50% 0;
+}
+
+.tap-ripple {
+  width: 30px;
+  height: 30px;
+  border: 1.4px solid rgba(247, 236, 220, 0.62);
+  box-shadow:
+    0 0 20px rgba(246, 228, 196, 0.26),
+    inset 0 0 10px rgba(255, 246, 228, 0.12);
+  animation: tap-ripple 3.6s ease-out infinite;
+}
+
+.tap-ripple-late {
+  animation-delay: 0.32s;
+}
+
+.tap-glow {
+  width: 16px;
+  height: 16px;
+  background: radial-gradient(circle, rgba(255, 246, 228, 0.95) 0%, rgba(246, 228, 196, 0.3) 48%, transparent 74%);
+  animation: tap-glow 3.6s ease-out infinite;
+}
+
+.tap-spark {
+  width: 22px;
+  height: 22px;
+  color: #fff6e4;
+  filter: drop-shadow(0 0 12px rgba(246, 228, 196, 0.55));
+  translate: -50% 0;
+  animation: tap-spark 3.6s ease-in-out infinite;
+}
+
+.tap-spark-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .opening.is-leaving {
@@ -236,6 +297,26 @@ button {
 
 .login-card .btn {
   width: 100%;
+}
+
+.login-card .wechat-btn,
+.wechat-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: #07c160;
+  border-color: #06ad56;
+  color: #fff;
+}
+
+.wechat-btn:disabled {
+  opacity: 0.7;
+}
+
+.wechat-icon {
+  width: 22px;
+  height: 22px;
 }
 
 .share-link {
@@ -815,6 +896,60 @@ button {
   to {
     opacity: 0;
     transform: scale(0.96);
+  }
+}
+
+@keyframes tap-spark {
+  0%,
+  18% {
+    transform: translateY(-18px) scale(0.78);
+    opacity: 0.55;
+  }
+  32% {
+    transform: translateY(-1px) scale(0.96);
+    opacity: 1;
+  }
+  38% {
+    transform: translateY(2px) scale(0.82);
+    opacity: 1;
+  }
+  58%,
+  100% {
+    transform: translateY(-20px) scale(0.76);
+    opacity: 0.4;
+  }
+}
+
+@keyframes tap-ripple {
+  0%,
+  30% {
+    transform: scale(0.3, 0.22);
+    opacity: 0;
+  }
+  38% {
+    opacity: 0.7;
+  }
+  76%,
+  100% {
+    transform: scale(3.4, 2);
+    opacity: 0;
+  }
+}
+
+@keyframes tap-glow {
+  0%,
+  30% {
+    transform: scale(0.35);
+    opacity: 0;
+  }
+  38% {
+    transform: scale(1.35);
+    opacity: 1;
+  }
+  60%,
+  100% {
+    transform: scale(0.65);
+    opacity: 0;
   }
 }
 
