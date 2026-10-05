@@ -4,6 +4,7 @@ const OPENID_KEY = 'starry-together:wechat-openid';
 
 let session = null;
 let skyMeta = null;
+let waffo = { enabled: false, environment: 'test' };
 
 export function getSession() {
   return session;
@@ -17,6 +18,10 @@ export function isHost() {
   return Boolean(session && skyMeta?.isHost);
 }
 
+export function getWaffo() {
+  return waffo;
+}
+
 export function applyAuth(payload) {
   session = payload?.user || null;
   skyMeta = payload?.sky
@@ -27,6 +32,7 @@ export function applyAuth(payload) {
         isHost: payload.sky.isHost,
       }
     : null;
+  if (payload?.waffo) waffo = payload.waffo;
   return { session, sky: payload?.sky || null };
 }
 

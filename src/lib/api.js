@@ -32,4 +32,5 @@ export const api = {
   createInvite: () => request('/api/invites', { method: 'POST', body: '{}' }),
   readInvite: (token) => request(`/api/invites/${token}`),
   acceptInvite: (token) => request(`/api/invites/${token}/accept`, { method: 'POST', body: '{}' }),
+  createCheckout: () => request('/api/checkout', { method: 'POST', body: '{}' }),
 };

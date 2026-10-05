@@ -8,6 +8,8 @@ export const siteConfig = {
   heroHint: '每个人都可以留下一颗。',
   whisperA: '有些话适合说出来。',
   whisperB: '有些话适合留在星星里。',
+  giftLine: '点亮一颗星星',
+  giftHint: '把一颗星星，真正留在这片天上。',
 };
 
 export function titleLines() {

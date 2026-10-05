@@ -333,6 +333,8 @@ button {
 .sky-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 2px;
 }
 
@@ -423,6 +425,22 @@ button {
 .home-hint {
   color: rgba(247, 236, 220, 0.7);
   font-size: 0.95rem;
+}
+
+.home-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.btn-gift {
+  min-height: 44px;
+  background: transparent;
+  color: rgba(247, 236, 220, 0.88);
+  border-color: rgba(247, 236, 220, 0.28);
+  box-shadow: none;
 }
 
 .scribble {

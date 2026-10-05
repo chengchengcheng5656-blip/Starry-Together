@@ -5,6 +5,7 @@ import {
   clearInviteFromUrl,
   getActiveSky,
   getSession,
+  getWaffo,
   getWechatOpenId,
   isHost,
   logout,
@@ -36,7 +37,7 @@ const OPENING_KEY = 'starry-together:opening-seen';
 const app = document.querySelector('#app');
 const overlayRoot = document.querySelector('#overlay-root');
 
-let route = location.hash === '#sky' ? 'sky' : 'home';
+let route = currentRoute();
 let enteringStarId = null;
 let sparkleStarId = null;
 let leavingStarId = null;
@@ -61,12 +62,14 @@ export async function startApp() {
     }
   }
   window.addEventListener('hashchange', () => {
-    route = location.hash === '#sky' ? 'sky' : 'home';
+    route = currentRoute();
     closeOverlay();
     render();
+    maybeShowGiftReturn();
   });
   document.addEventListener('keydown', onGlobalKey);
   render();
+  maybeShowGiftReturn();
 }
 
 function bindViewport() {
@@ -241,9 +244,14 @@ function renderHome() {
           ${scribbleSvg}
           <p class="home-sub">${escapeHtml(siteConfig.heroSub)}</p>
           <p class="home-hint">${escapeHtml(siteConfig.heroHint)}</p>
-          <button class="btn btn-solid" type="button" data-go-sky aria-label="去看看星空">
-            ✨ 去看看
-          </button>
+          <div class="home-actions">
+            <button class="btn btn-solid" type="button" data-go-sky aria-label="去看看星空">
+              ✨ 去看看
+            </button>
+            <button class="btn btn-gift" type="button" data-gift aria-label="${escapeAttr(siteConfig.giftLine)}">
+              ${escapeHtml(siteConfig.giftLine)}
+            </button>
+          </div>
         </div>
         <div class="home-whispers">
           <p>${escapeHtml(siteConfig.whisperA)}</p>
@@ -254,6 +262,7 @@ function renderHome() {
   `;
   app.querySelector('[data-opening]')?.addEventListener('click', dismissOpening);
   app.querySelector('[data-go-sky]')?.addEventListener('click', goSky);
+  app.querySelector('[data-gift]')?.addEventListener('click', (event) => startGiftCheckout(event.currentTarget));
 }
 
 function dismissOpening() {
@@ -291,6 +300,9 @@ function renderSky() {
       <header class="sky-top">
         <p class="sky-brand">${escapeHtml(hostLabel)}</p>
         <div class="sky-actions">
+          <button class="sky-link" type="button" data-gift aria-label="${escapeAttr(siteConfig.giftLine)}">
+            ${escapeHtml(siteConfig.giftLine)}
+          </button>
           <button class="sky-link" type="button" data-share aria-label="把这片星空送给朋友">
             送给朋友
           </button>
@@ -312,6 +324,7 @@ function renderSky() {
 
   app.querySelector('[data-go-home]')?.addEventListener('click', goHome);
   app.querySelector('[data-share]')?.addEventListener('click', openShareModal);
+  app.querySelector('[data-gift]')?.addEventListener('click', (event) => startGiftCheckout(event.currentTarget));
   app.querySelector('[data-write]')?.addEventListener('click', () => openWriteModal());
   app.querySelector('[data-empty-write]')?.addEventListener('click', () => openWriteModal());
   app.querySelectorAll('.star-hit').forEach((button) => {
@@ -379,6 +392,94 @@ function renderStar(star) {
 
 function goSky() {
   location.hash = 'sky';
+}
+
+async function startGiftCheckout(button) {
+  if (button) button.disabled = true;
+  try {
+    const data = await api.createCheckout();
+    const opened = window.open(data.checkoutUrl, '_blank', 'noopener,noreferrer');
+    if (!opened && data.checkoutUrl) {
+      showGiftNotice('请允许弹出窗口，再轻轻点一次。');
+    }
+  } catch (error) {
+    const configured = getWaffo()?.enabled;
+    const message = !configured || error.status === 503
+      ? '收款还没接上。把私钥写进 .env 的 WAFFO_PRIVATE_KEY，然后重新启动。'
+      : error.data?.message || '这一次没有走出去，稍后再试试。';
+    showGiftNotice(message);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function showGiftNotice(message) {
+  showOverlay(`
+    <div class="overlay" data-overlay>
+      <div class="paper" role="dialog" aria-modal="true" aria-labelledby="gift-title">
+        <div class="paper-head">
+          <h2 id="gift-title">${escapeHtml(siteConfig.giftLine)}</h2>
+          <button class="btn btn-ghost close-paper" type="button" data-close aria-label="先收起来">先收起来</button>
+        </div>
+        <p class="star-card-body">${escapeHtml(message)}</p>
+      </div>
+    </div>
+  `);
+}
+
+function currentRoute() {
+  return hashPath() === 'sky' ? 'sky' : 'home';
+}
+
+function hashPath() {
+  return location.hash.replace(/^#/, '').split('?')[0];
+}
+
+function hashParams() {
+  const hash = location.hash.replace(/^#/, '');
+  const query = hash.includes('?') ? hash.slice(hash.indexOf('?') + 1) : '';
+  return new URLSearchParams(query);
+}
+
+function hasGiftReturn() {
+  return hashParams().get('gift') === '1' || new URLSearchParams(location.search).get('gift') === '1';
+}
+
+function clearGiftReturn() {
+  const path = hashPath();
+  const url = new URL(location.href);
+  url.searchParams.delete('gift');
+  url.hash = path ? `#${path}` : '';
+  history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
+async function maybeShowGiftReturn() {
+  if (!hasGiftReturn()) return;
+  clearGiftReturn();
+  route = 'sky';
+  try {
+    await hydrateSky();
+  } catch {
+    /* sky may not have the gift star yet */
+  }
+  render();
+  showGiftNotice('这颗星星正在亮起来。如果还没看见，稍等一会儿再回来看看。');
+  pollGiftStar();
+}
+
+async function pollGiftStar() {
+  for (let i = 0; i < 6; i += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 1600));
+    try {
+      const state = await hydrateSky();
+      if (state?.stars?.some((star) => star.isGift && !star.resting)) {
+        render();
+        return;
+      }
+    } catch {
+      /* keep waiting for the webhook */
+    }
+  }
 }
 
 async function openShareModal() {

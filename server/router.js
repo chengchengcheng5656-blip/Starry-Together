@@ -1,5 +1,13 @@
 import { DEFAULT_RELATIONS, DEFAULT_STARS } from '../src/data/defaults.js';
 import { id, loadDb, saveDb } from './store.js';
+import {
+  createGiftCheckout,
+  fulfillWaffoEvent,
+  isWaffoConfigured,
+  verifyWaffoWebhook,
+  waffoErrorPayload,
+  waffoStatus,
+} from './waffo.js';
 
 const COOKIE = 'starry_sid';
 
@@ -11,8 +19,10 @@ export function createRouter(env) {
     if (route === 'GET /auth/wechat') return startWechat(req, res, url, env);
     if (route === 'GET /auth/wechat/callback') return wechatCallback(req, res, url, env);
     if (route === 'POST /auth/wechat/local') return localWechat(req, res, env);
-    if (route === 'GET /api/me') return me(req, res);
+    if (route === 'GET /api/me') return me(req, res, env);
     if (route === 'POST /api/logout') return logout(req, res);
+    if (route === 'POST /api/checkout') return startCheckout(req, res, env);
+    if (route === 'POST /api/webhooks/waffo') return waffoWebhook(req, res, env);
     if (route === 'GET /api/sky') return getSky(req, res);
     if (route === 'POST /api/stars') return createStar(req, res);
     if (route === 'POST /api/invites') return createInvite(req, res);
@@ -88,10 +98,44 @@ async function localWechat(req, res, env) {
   return json(res, 200, { user: publicUser(user), sky: publicSky(ensureSky(user), user.id) });
 }
 
-function me(req, res) {
+function me(req, res, env) {
   const user = currentUser(req);
-  if (!user) return json(res, 200, { user: null, sky: null });
-  return json(res, 200, { user: publicUser(user), sky: publicSky(ensureSky(user), user.id) });
+  const waffo = waffoStatus(env);
+  if (!user) return json(res, 200, { user: null, sky: null, waffo });
+  return json(res, 200, { user: publicUser(user), sky: publicSky(ensureSky(user), user.id), waffo });
+}
+
+async function startCheckout(req, res, env) {
+  const user = currentUser(req);
+  if (!user) return json(res, 401, { error: 'login' });
+  if (!isWaffoConfigured(env)) return json(res, 503, waffoErrorPayload({ code: 'waffo_not_configured' }));
+  try {
+    const session = await createGiftCheckout(env, {
+      user,
+      sky: ensureSky(user),
+      origin: requestOrigin(req),
+    });
+    return json(res, 200, session);
+  } catch (error) {
+    const payload = waffoErrorPayload(error);
+    return json(res, payload.status && payload.status < 500 ? payload.status : 500, payload);
+  }
+}
+
+async function waffoWebhook(req, res, env) {
+  const rawBody = await readRawBody(req);
+  const signature = req.headers['x-waffo-signature'];
+  try {
+    const event = verifyWaffoWebhook(env, rawBody, signature);
+    fulfillWaffoEvent(event);
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.end('OK');
+  } catch {
+    res.statusCode = 401;
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.end('Invalid signature');
+  }
 }
 
 function logout(req, res) {
@@ -384,18 +428,28 @@ function redirect(res, to) {
   res.end();
 }
 
+function requestOrigin(req) {
+  const forwarded = req.headers['x-forwarded-proto'];
+  const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost:5173';
+  const proto = forwarded || (String(host).includes('localhost') ? 'http' : 'https');
+  return `${proto}://${host}`;
+}
+
+function readRawBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('error', reject);
+  });
+}
+
 function readBody(req) {
-  return new Promise((resolve) => {
-    let data = '';
-    req.on('data', (chunk) => {
-      data += chunk;
-    });
-    req.on('end', () => {
-      try {
-        resolve(data ? JSON.parse(data) : {});
-      } catch {
-        resolve({});
-      }
-    });
+  return readRawBody(req).then((data) => {
+    try {
+      return data ? JSON.parse(data) : {};
+    } catch {
+      return {};
+    }
   });
 }

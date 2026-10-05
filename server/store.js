@@ -9,6 +9,9 @@ const empty = () => ({
   skies: [],
   members: [],
   invites: [],
+  payments: [],
+  webhookEvents: [],
+  waffo: { productId: '' },
 });
 
 export function loadDb() {
